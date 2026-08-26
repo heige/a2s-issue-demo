@@ -18,5 +18,15 @@
     "name": "mixed ASCII whitespace",
     "input": "\thello\n\rworld\f\u000b",
     "want": "hello world"
+  },
+  {
+    "name": "NBSP U+00A0 normalized",
+    "input": "hello\u00a0world",
+    "want": "hello world"
+  },
+  {
+    "name": "EM SPACE U+2003 normalized",
+    "input": "hello\u2003world",
+    "want": "hello world"
   }
 ]
