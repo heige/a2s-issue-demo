@@ -49,14 +49,12 @@ jobs:
 
           issue_title="$(gh api "repos/$GH_REPO/issues/$issue_number" --jq .title)"
 
+          body="$(printf 'Automated draft for #%s.\n\nHead commit: `%s`\n\nThe A-Space action produced this branch. CI and human review remain required.' "$issue_number" "$HEAD_SHA")"
+
           gh pr create \
             --repo "$GH_REPO" \
             --draft \
             --base "$BASE_BRANCH" \
             --head "$HEAD_BRANCH" \
             --title "A2S: $issue_title" \
-            --body "Automated draft for #$issue_number.
-
-Head commit: \`$HEAD_SHA\`
-
-The A-Space action produced this branch. CI and human review remain required."
+            --body "$body"
