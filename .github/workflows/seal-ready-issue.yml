@@ -1,0 +1,204 @@
+name: Seal ready Issue authorization
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  seal:
+    if: >-
+      github.actor == 'heige' &&
+      github.event.label.name == 'a2s:ready'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Bind the maintainer judgment to immutable facts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import struct
+          import urllib.parse
+          import urllib.request
+
+          OWNER = "heige"
+          REPOSITORY = "a2s-issue-demo"
+          READY_LABEL = "a2s:ready"
+          MARKER_START = "<!-- a2s-ready-authorization-seal:v1"
+          MARKER_END = "-->"
+          MAX_PAGES = 10
+          PAGE_SIZE = 100
+
+          def fail(message):
+              raise RuntimeError(message)
+
+          def api(method, endpoint, body=None):
+              url = "https://api.github.com" + endpoint
+              data = None
+              if body is not None:
+                  data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+              request = urllib.request.Request(url, method=method, data=data)
+              request.add_header("Accept", "application/vnd.github+json")
+              request.add_header("Authorization", "Bearer " + os.environ["GH_TOKEN"])
+              request.add_header("X-GitHub-Api-Version", "2022-11-28")
+              request.add_header("Content-Type", "application/json")
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  if response.status < 200 or response.status >= 300:
+                      fail(f"GitHub API returned HTTP {response.status}")
+                  return json.load(response)
+
+          def paged(endpoint):
+              values = []
+              for page in range(1, MAX_PAGES + 1):
+                  separator = "&" if "?" in endpoint else "?"
+                  result = api("GET", endpoint + separator + urllib.parse.urlencode({
+                      "page": page,
+                      "per_page": PAGE_SIZE,
+                  }))
+                  if not isinstance(result, list):
+                      fail("GitHub paginated response is not a list")
+                  values.extend(result)
+                  if len(result) < PAGE_SIZE:
+                      return values
+              fail("GitHub pagination exceeded the fail-closed page limit")
+
+          def require_string(value, field, allow_empty=False):
+              if not isinstance(value, str) or (not allow_empty and value == ""):
+                  fail(field + " must be a non-empty string")
+              value.encode("utf-8", "strict")
+              return value
+
+          def tlv_digest(fields):
+              digest = hashlib.sha256()
+              for tag, value in fields:
+                  tag_bytes = tag.encode("utf-8", "strict")
+                  value_bytes = value.encode("utf-8", "strict")
+                  digest.update(struct.pack(">I", len(tag_bytes)))
+                  digest.update(tag_bytes)
+                  digest.update(struct.pack(">Q", len(value_bytes)))
+                  digest.update(value_bytes)
+              return "sha256:" + digest.hexdigest()
+
+          with open(os.environ["GITHUB_EVENT_PATH"], "rb") as source:
+              payload = json.load(source)
+
+          repository = payload.get("repository") or {}
+          issue = payload.get("issue") or {}
+          sender = payload.get("sender") or {}
+          label = payload.get("label") or {}
+          if repository.get("full_name") != f"{OWNER}/{REPOSITORY}":
+              fail("repository is outside the fixed authorization boundary")
+          if sender.get("login") != OWNER or os.environ.get("GITHUB_ACTOR") != OWNER:
+              fail("only the repository owner can authorize processing")
+          if label.get("name") != READY_LABEL:
+              fail("workflow was not triggered by the ready label")
+
+          issue_number = issue.get("number")
+          issue_id = issue.get("id")
+          if not isinstance(issue_number, int) or issue_number <= 0 or not isinstance(issue_id, int) or issue_id <= 0:
+              fail("Issue identity is incomplete")
+          issue_node_id = require_string(issue.get("node_id"), "issue.node_id")
+          issue_title = require_string(issue.get("title"), "issue.title")
+          issue_body = issue.get("body")
+          if issue_body is None:
+              issue_body = ""
+          issue_body = require_string(issue_body, "issue.body", allow_empty=True)
+          issue_created_at = require_string(issue.get("created_at"), "issue.created_at")
+          issue_updated_at = require_string(issue.get("updated_at"), "issue.updated_at")
+          issue_author = require_string((issue.get("user") or {}).get("login"), "issue.user.login")
+
+          labels = []
+          for entry in issue.get("labels") or []:
+              labels.append(require_string((entry or {}).get("name"), "issue.labels[].name"))
+          labels.sort()
+          if len(labels) != len(set(labels)) or READY_LABEL not in labels:
+              fail("Issue labels are duplicate or missing the ready label")
+          events = paged(f"/repos/{OWNER}/{REPOSITORY}/issues/{issue_number}/events")
+          matching = []
+          for event in events:
+              if (event.get("event") == "labeled" and
+                      (event.get("label") or {}).get("name") == READY_LABEL and
+                      (event.get("actor") or {}).get("login") == OWNER and
+                      event.get("created_at") == issue_updated_at):
+                  matching.append(event)
+          if len(matching) != 1:
+              fail(f"expected exactly one ready authorization event at issue.updated_at, got {len(matching)}")
+          authorization = matching[0]
+          authorization_id = authorization.get("id")
+          if not isinstance(authorization_id, int) or authorization_id <= 0:
+              fail("authorization event ID is invalid")
+          authorization_node_id = require_string(authorization.get("node_id"), "authorization.node_id")
+          authorization_created_at = require_string(authorization.get("created_at"), "authorization.created_at")
+          base_sha = require_string(os.environ.get("GITHUB_SHA"), "GITHUB_SHA")
+          if len(base_sha) not in (40, 64) or any(character not in "0123456789abcdef" for character in base_sha):
+              fail("GITHUB_SHA is not a canonical Git object ID")
+
+          digest_fields = [
+              ("repository", f"{OWNER}/{REPOSITORY}"),
+              ("issue.id", str(issue_id)),
+              ("issue.node_id", issue_node_id),
+              ("issue.number", str(issue_number)),
+              ("issue.title", issue_title),
+              ("issue.body", issue_body),
+              ("issue.created_at", issue_created_at),
+              ("issue.author_login", issue_author),
+              ("issue.labels.count", str(len(labels))),
+          ]
+          for index, name in enumerate(labels):
+              digest_fields.append((f"issue.labels.{index}", name))
+          digest_fields.extend([
+              ("authorization_event.id", str(authorization_id)),
+              ("authorization_event.node_id", authorization_node_id),
+              ("authorization_event.actor", OWNER),
+              ("authorization_event.created_at", authorization_created_at),
+              ("authorized_label", READY_LABEL),
+              ("base_sha", base_sha),
+          ])
+          digest = tlv_digest(digest_fields)
+          comment = "\n".join([
+              MARKER_START,
+              f"repository: {OWNER}/{REPOSITORY}",
+              f"issue-number: {issue_number}",
+              f"authorization-event-id: {authorization_id}",
+              f"authorization-event-node-id: {authorization_node_id}",
+              f"authorization-event-created-at: {authorization_created_at}",
+              f"base-sha: {base_sha}",
+              f"digest: {digest}",
+              MARKER_END,
+          ])
+
+          comments = paged(f"/repos/{OWNER}/{REPOSITORY}/issues/{issue_number}/comments")
+          same_event_markers = []
+          for existing in comments:
+              body = existing.get("body")
+              if not isinstance(body, str) or not body.startswith(MARKER_START + "\n"):
+                  continue
+              user = existing.get("user") or {}
+              if user.get("login") != "github-actions[bot]" or user.get("type") != "Bot":
+                  continue
+              lines = body.split("\n")
+              event_line = f"authorization-event-id: {authorization_id}"
+              node_line = f"authorization-event-node-id: {authorization_node_id}"
+              if event_line in lines or node_line in lines:
+                  same_event_markers.append(existing)
+
+          valid_identical = []
+          for existing in same_event_markers:
+              if (existing.get("body") == comment and
+                      existing.get("created_at") == existing.get("updated_at")):
+                  valid_identical.append(existing)
+              else:
+                  fail("a conflicting or unauthentic seal exists for this authorization event")
+          if valid_identical:
+              print("An identical unedited authorization seal already exists.")
+          else:
+              api("POST", f"/repos/{OWNER}/{REPOSITORY}/issues/{issue_number}/comments", {"body": comment})
+              print("Created the authorization seal.")
+          PY
