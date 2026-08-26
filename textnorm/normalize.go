@@ -3,7 +3,9 @@ package textnorm
 
 import "strings"
 
-// Normalize trims and collapses runs of ASCII whitespace into a single space.
+// Normalize trims and collapses runs of whitespace into a single space.
+// Recognized whitespace includes ASCII whitespace plus NBSP (U+00A0) and
+// EM SPACE (U+2003) per GitHub Issue #5.
 func Normalize(input string) string {
 	var output strings.Builder
 	output.Grow(len(input))
@@ -11,7 +13,7 @@ func Normalize(input string) string {
 	wroteText := false
 	pendingSpace := false
 	for _, character := range input {
-		if isASCIIWhitespace(character) {
+		if isWhitespace(character) {
 			if wroteText {
 				pendingSpace = true
 			}
@@ -29,9 +31,11 @@ func Normalize(input string) string {
 	return output.String()
 }
 
-func isASCIIWhitespace(character rune) bool {
+// isWhitespace reports whether character is an ASCII whitespace rune or one of
+// the Unicode whitespace runes NBSP (U+00A0) and EM SPACE (U+2003).
+func isWhitespace(character rune) bool {
 	switch character {
-	case ' ', '\t', '\n', '\r', '\f', '\v':
+	case ' ', '\t', '\n', '\r', '\f', '\v', '\u00a0', '\u2003':
 		return true
 	default:
 		return false
