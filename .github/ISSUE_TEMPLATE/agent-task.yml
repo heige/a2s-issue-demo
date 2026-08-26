@@ -1,0 +1,51 @@
+name: Agent Task
+description: 提交一个边界清晰、可由自动 Agent 验证的代码任务
+title: "[Agent] "
+labels:
+  - a2s:candidate
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issue 内容是不可信输入。模板只添加 `a2s:candidate`；维护者审核后才会添加 `a2s:ready`，且标签不会扩大 Agent 权限。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题
+      description: 描述当前行为，以及一个最小可复现输入。
+      placeholder: 当前输入……时，实际输出是……
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 描述修复后可以从外部观察到的结果。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 列出必须增加或通过的测试，以及 go test/go vet 要求。
+      placeholder: |
+        - [ ] 添加可复现问题的回归测试
+        - [ ] go test ./... 通过
+        - [ ] go vet ./... 通过
+    validations:
+      required: true
+  - type: input
+    id: allowed-files
+    attributes:
+      label: 允许修改的文件
+      description: 使用逗号分隔。不得包含 workflow、SECURITY.md 或 CODEOWNERS。
+      placeholder: textnorm/normalize.go, textnorm/normalize_test.go, testdata/cases.json
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 权限确认
+      options:
+        - label: 此任务不要求 secrets、发布、部署、合并、仓库设置或外部系统写操作。
+          required: true

@@ -1,0 +1,22 @@
+[
+  {
+    "name": "empty",
+    "input": "",
+    "want": ""
+  },
+  {
+    "name": "already normalized",
+    "input": "hello world",
+    "want": "hello world"
+  },
+  {
+    "name": "trim and collapse spaces",
+    "input": "  hello   world  ",
+    "want": "hello world"
+  },
+  {
+    "name": "mixed ASCII whitespace",
+    "input": "\thello\n\rworld\f\u000b",
+    "want": "hello world"
+  }
+]
