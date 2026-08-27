@@ -18,5 +18,15 @@
     "name": "mixed ASCII whitespace",
     "input": "\thello\n\rworld\f\u000b",
     "want": "hello world"
+  },
+  {
+    "name": "no-break space collapse",
+    "input": "hello\u00a0\u00a0world\u00a0",
+    "want": "hello world"
+  },
+  {
+    "name": "em space collapse",
+    "input": "\u2003hello\u2003world\u2003",
+    "want": "hello world"
   }
 ]
