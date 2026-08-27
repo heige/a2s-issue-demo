@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "a2s/**"
+  pull_request:
 
 permissions: {}
 
